@@ -1623,7 +1623,7 @@ install_update_v2ray_tls_web()
         install_dependence "gperftools-devel libatomic_ops-devel pcre-devel zlib-devel libxslt-devel gd-devel perl-ExtUtils-Embed perl-Data-Dumper perl-IPC-Cmd geoip-devel lksctp-tools-devel libxml2-devel gcc gcc-c++ wget unzip curl make openssl crontabs"
         ##libxml2-devel非必须
     else
-        if [ "$release" == "ubuntu" ] && [ "$systemVersion" == "20.04" ]; then
+        if [ "$release" == "ubuntu" ] && [ "$systemVersion" == "20.04" ] && [ "$(uname -m)" == "x86_64" ]; then
             install_dependence "gcc-10 g++-10"
             apt -y purge gcc g++ gcc-9 g++-9 gcc-8 g++-8 gcc-7 g++-7
             apt -y autopurge
