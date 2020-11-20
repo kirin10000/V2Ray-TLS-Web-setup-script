@@ -1,4 +1,6 @@
 # V2Ray-TLS+Web搭建/管理脚本
+## XTLS已被移除：https://github.com/mack-a/v2ray-agent/issues/32
+新项目(X-ray)脚本(在建)：https://github.com/kirin10000/Xray-TLS-Web
 ## 脚本特性
 1.支持 (V2Ray-TCP+TLS) + (V2Ray-WebSocket+TLS) + Web
 
