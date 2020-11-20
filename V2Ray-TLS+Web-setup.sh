@@ -875,11 +875,11 @@ readProtocolConfig()
 {
     echo -e "\n\n\n"
     tyblue "---------------------请选择V2Ray要使用协议---------------------"
-    tyblue " 1. (VLESS-TCP+XTLS) + (VMess-WebSocket+TLS) + Web"
+    tyblue " 1. (VLESS-TCP+TLS) + (VMess-WebSocket+TLS) + Web"
     green  "    适合有时使用CDN，且CDN不可信任(如国内CDN)"
-    tyblue " 2. (VLESS-TCP+XTLS) + (VLESS-WebSocket+TLS) + Web"
+    tyblue " 2. (VLESS-TCP+TLS) + (VLESS-WebSocket+TLS) + Web"
     green  "    适合有时使用CDN，且CDN可信任"
-    tyblue " 3. VLESS-TCP+XTLS+Web"
+    tyblue " 3. VLESS-TCP+TLS+Web"
     green  "    适合完全不用CDN"
     tyblue " 4. VMess-WebSocket+TLS+Web"
     green  "    适合一直使用CDN，且CDN不可信任(如国内CDN)"
@@ -887,11 +887,10 @@ readProtocolConfig()
     green  "    适合一直使用CDN，且CDN可信任"
     echo
     yellow " 注："
-    yellow "   1.各协议理论速度对比：https://github.com/badO1a5A90/v2ray-doc/blob/main/v2ray_speed_test_v4.32.1.md"
-    yellow "   2.XTLS完全兼容TLS"
-    yellow "   3.WebSocket协议支持CDN，TCP不支持"
-    yellow "   4.VLESS协议用于CDN，CDN可以看见传输的明文"
-    yellow "   5.若不知CDN为何物，请选3"
+    yellow "   1.各协议理论速度对比：https://github.com/badO1a5A90/v2ray-doc/blob/main/performance_test/Xray/speed_test_2020119.md"
+    yellow "   2.WebSocket协议支持CDN，TCP不支持"
+    yellow "   3.VLESS协议用于CDN，CDN可以看见传输的明文"
+    yellow "   4.若不知CDN为何物，请选3"
     echo
     local mode=""
     while [[ "$mode" != "1" && "$mode" != "2" && "$mode" != "3" && "$mode" != "4" && "$mode" != "5" ]]
@@ -1279,7 +1278,6 @@ cat >> $v2ray_config <<EOF
                 "clients": [
                     {
                         "id": "$v2id_1",
-                        "flow": "xtls-rprx-direct",
                         "level": 2
                     }
                 ],
@@ -1310,8 +1308,8 @@ cat >> $v2ray_config <<EOF
             },
             "streamSettings": {
                 "network": "tcp",
-                "security": "xtls",
-                "xtlsSettings": {
+                "security": "tls",
+                "tlsSettings": {
                     "alpn": [
                         "h2",
                         "http/1.1"
@@ -1416,20 +1414,19 @@ echo_end()
     get_all_domains
     echo -e "\n\n\n"
     if [ $protocol_1 -ne 0 ]; then
-        tyblue "--------------------- V2Ray-TCP+XTLS+Web (不走CDN) ---------------------"
+        tyblue "--------------------- V2Ray-TCP+TLS+Web (不走CDN) ---------------------"
         tyblue " 服务器类型            ：VLESS"
         tyblue " address(地址)         ：服务器ip"
         purple "  (Qv2ray:主机)"
         tyblue " port(端口)            ：443"
         tyblue " id(用户ID/UUID)       ：${v2id_1}"
-        tyblue " flow(流控)            ：使用XTLS：xtls-rprx-direct-udp443;使用TLS：空"
         tyblue " encryption(加密)      ：none"
         tyblue " ---Transport/StreamSettings(底层传输方式/流设置)---"
         tyblue "  network(传输协议)             ：tcp"
         purple "   (Shadowrocket:传输方式:none)"
         tyblue "  type(伪装类型)                ：none"
         purple "   (Qv2ray:协议设置-类型)"
-        tyblue "  security(传输层加密)          ：xtls或tls \033[35;1m(此选项将决定是使用XTLS还是TLS)"
+        tyblue "  security(传输层加密)          ：tls"
         purple "   (V2RayN(G):底层传输安全;Qv2ray:TLS设置-安全类型)"
         if [ ${#all_domains[@]} -eq 1 ]; then
             tyblue "  serverName(验证服务端证书域名)：${all_domains[@]}"
@@ -1441,18 +1438,12 @@ echo_end()
         purple "   (Qv2ray:允许不安全的证书(不打勾);Shadowrocket:允许不安全(关闭))"
         tyblue "  tcpFastOpen(TCP快速打开)      ：可以启用"
         tyblue " ------------------------其他-----------------------"
-        tyblue "  Mux(多路复用)                 ：使用XTLS必须关闭;不使用XTLS也建议关闭"
+        tyblue "  Mux(多路复用)                 ：建议关闭"
         tyblue "  Sniffing(流量探测)            ：建议开启"
         purple "   (Qv2ray:首选项-入站设置-SOCKS设置-嗅探)"
         tyblue "------------------------------------------------------------------------"
         echo
         yellow " 请确保客户端V2Ray版本为v4.30.0+(VLESS在4.30.0版本中对UDP传输进行了一次更新，并且不向下兼容)"
-        yellow " 使用XLTS请确保客户端V2Ray版本为v4.31.0+(XTLS在4.31.0版本中对流控进行了一次升级，并且不向下兼容)"
-        echo
-        green  " 目前支持支持XTLS的图形化客户端："
-        green  "   Windows    ：V2RayN  v3.26+  Qv2ray v2.7.0-pre1+"
-        green  "   Android    ：V2RayNG v1.4.8+"
-        green  "   Linux/MacOS：Qv2ray  v2.7.0-pre1+"
     fi
     if [ $protocol_2 -ne 0 ]; then
         echo
@@ -1517,7 +1508,7 @@ echo_end()
 #获取配置信息 protocol_1 v2id_1 protocol_2 v2id_2 path
 get_base_information()
 {
-    if grep -q "flow" $v2ray_config; then
+    if [ $(grep "clients" $v2ray_config | wc -l) -eq 2 ]; then
         protocol_1=1
         v2id_1=`grep id $v2ray_config | head -n 1`
         v2id_1=${v2id_1##*' '}
@@ -2047,7 +2038,7 @@ start_menu()
         get_base_information
         if [ $protocol_1 -ne 0 ] && [ $protocol_2 -ne 0 ]; then
             tyblue "-------------请输入你要修改的id-------------"
-            tyblue " 1. V2Ray-TCP+XTLS 的id"
+            tyblue " 1. V2Ray-TCP+TLS 的id"
             tyblue " 2. V2Ray-WebSocket+TLS 的id"
             echo
             local flag=""
@@ -2086,7 +2077,7 @@ start_menu()
         fi
         get_base_information
         if [ $protocol_2 -eq 0 ]; then
-            red "V2Ray-TCP+XTLS+Web模式没有path!!"
+            red "V2Ray-TCP+TLS+Web模式没有path!!"
             exit 0
         fi
         tyblue "您现在的path是：$path"
