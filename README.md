@@ -1,6 +1,6 @@
 # V2Ray-TLS+Web搭建/管理脚本
 ## 脚本特性
-1.支持 (V2Ray-TCP+XTLS) + (V2Ray-WebSocket+TLS) + Web
+1.支持 (V2Ray-TCP+TLS) + (V2Ray-WebSocket+TLS) + Web
 
 2.集成 多版本bbr/锐速 安装选项
  
