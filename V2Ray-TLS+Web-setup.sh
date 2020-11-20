@@ -1,12 +1,16 @@
 #!/bin/bash
 
-#安装信息
+#安装选项
 nginx_version="nginx-1.19.4"
 openssl_version="openssl-openssl-3.0.0-alpha8"
 v2ray_config="/usr/local/etc/v2ray/config.json"
 nginx_prefix="/etc/nginx"
 nginx_config="${nginx_prefix}/conf.d/v2ray.conf"
 temp_dir="/temp_install_update_v2ray_tls_web"
+v2ray_is_installed=""
+nginx_is_installed=""
+is_installed=""
+update=""
 
 #配置信息
 unset domain_list
@@ -77,6 +81,26 @@ if [ "$(cat /proc/meminfo |grep 'MemTotal' |awk '{print $3}' | tr [A-Z] [a-z])" 
     fi
 else
     mem_ok=2
+fi
+if [ -e /usr/local/bin/v2ray ]; then
+    v2ray_is_installed=1
+else
+    v2ray_is_installed=0
+fi
+if [ -e $nginx_config ]; then
+    nginx_is_installed=1
+else
+    nginx_is_installed=0
+fi
+if [ $v2ray_is_installed -eq 1 ] && [ $nginx_is_installed -eq 1 ]; then
+    is_installed=1
+else
+    is_installed=0
+fi
+if [ -e /usr/bin/v2ray ] && [ -e /etc/nginx ]; then
+    yellow "当前安装的V2Ray版本过旧，脚本已不再支持！"
+    yellow "请选择1选项重新安装"
+    sleep 3s
 fi
 
 check_important_dependence_installed()
@@ -178,12 +202,6 @@ check_SELinux()
     fi
 }
 
-if [ -e /usr/bin/v2ray ] && [ -e /etc/nginx ]; then
-    yellow "当前安装的V2Ray版本过旧，脚本已不再支持！"
-    yellow "请选择1选项重新安装"
-    sleep 3s
-fi
-
 #将域名列表转化为一个数组
 get_all_domains()
 {
@@ -197,26 +215,6 @@ get_all_domains()
             all_domains+=("${domain_list[i]}")
         fi
     done
-}
-
-#判断是否已经安装
-check_is_installed()
-{
-    if [ -e /usr/local/bin/v2ray ]; then
-        v2ray_is_installed=1
-    else
-        v2ray_is_installed=0
-    fi
-    if [ -e $nginx_config ]; then
-        nginx_is_installed=1
-    else
-        nginx_is_installed=0
-    fi
-    if [ $v2ray_is_installed -eq 1 ] && [ $nginx_is_installed -eq 1 ]; then
-        is_installed=1
-    else
-        is_installed=0
-    fi
 }
 
 #配置sshd
@@ -1605,10 +1603,7 @@ install_update_v2ray_tls_web()
             fi
         fi
     }
-    apt -y -f install
-    get_system_info
     check_SELinux
-    check_important_dependence_installed ca-certificates ca-certificates
     if ! grep -q "#This file has been edited by v2ray-WebSocket-TLS-Web-setup-script" /etc/ssh/sshd_config; then
         setsshd
     fi
@@ -1867,6 +1862,11 @@ start_menu()
     do
         read -p "您的选择是：" choice
     done
+    if [ $choice -le 5 ] || [ $choice -eq 9 ] || [ $choice -eq 10 ]; then
+        apt -y -f install
+        get_system_info
+        check_important_dependence_installed ca-certificates ca-certificates
+    fi
     if [ $choice -eq 1 ]; then
         install_update_v2ray_tls_web
     elif [ $choice -eq 2 ]; then
@@ -1887,11 +1887,9 @@ start_menu()
         chmod +x "$0"
         "$0" --update
     elif [ $choice -eq 3 ]; then
-        apt -y -f install
-        get_system_info
-        check_important_dependence_installed ca-certificates ca-certificates
         enter_temp_dir
         install_bbr
+        apt -y -f install
         rm -rf "$temp_dir"
     elif [ $choice -eq 4 ]; then
         if install_update_v2ray; then
@@ -2133,7 +2131,6 @@ start_menu()
     fi
 }
 
-check_is_installed
 if ! [ "$1" == "--update" ]; then
     update=0
     start_menu
