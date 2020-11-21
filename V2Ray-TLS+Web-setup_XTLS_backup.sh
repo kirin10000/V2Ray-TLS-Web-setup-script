@@ -2138,5 +2138,8 @@ if ! [ "$1" == "--update" ]; then
     start_menu
 else
     update=1
+    apt -y -f install
+    get_system_info
+    check_important_dependence_installed ca-certificates ca-certificates
     install_update_v2ray_tls_web
 fi
