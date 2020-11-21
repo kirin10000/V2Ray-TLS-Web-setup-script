@@ -1022,7 +1022,7 @@ install_update_v2ray()
 get_cert()
 {
     mv $v2ray_config $v2ray_config.bak
-    echo "{}" >> $v2ray_config
+    echo "{}" > $v2ray_config
     if [ $2 -eq 1 ]; then
         local temp="-d www.$1"
     else
@@ -1517,7 +1517,7 @@ echo_end()
 #获取配置信息 protocol_1 v2id_1 protocol_2 v2id_2 path
 get_base_information()
 {
-    if grep -q "flow" $v2ray_config; then
+    if [ $(grep "clients" $v2ray_config | wc -l) -eq 2 ] || [ $(grep -E "vmess|vless" $v2ray_config | wc -l) -eq 1 ]; then
         protocol_1=1
         v2id_1=`grep id $v2ray_config | head -n 1`
         v2id_1=${v2id_1##*' '}
@@ -1705,9 +1705,11 @@ install_update_v2ray_tls_web()
     systemctl enable v2ray
 
     green "正在获取证书。。。。"
-    [ -e $HOME/.acme.sh/acme.sh ] && $HOME/.acme.sh/acme.sh --uninstall
-    rm -rf $HOME/.acme.sh
-    curl https://get.acme.sh | sh
+    if [ $update -eq 0 ]; then
+        [ -e $HOME/.acme.sh/acme.sh ] && $HOME/.acme.sh/acme.sh --uninstall
+        rm -rf $HOME/.acme.sh
+        curl https://get.acme.sh | sh
+    fi
     $HOME/.acme.sh/acme.sh --upgrade --auto-upgrade
     get_all_certs
 
@@ -1805,7 +1807,7 @@ start_menu()
     else
         nginx_status="${nginx_status}                \033[31m未运行"
     fi
-    tyblue "-------------------- V2Ray TLS(1.3)+Web 搭建/管理脚本----------------------"
+    tyblue "--------------------- V2Ray-TLS(1.3)+Web 搭建/管理脚本 ---------------------"
     echo
     tyblue "            V2Ray：            ${v2ray_status}"
     echo
@@ -1813,13 +1815,13 @@ start_menu()
     echo
     tyblue " 官网：https://github.com/kirin10000/V2Ray-TLS-Web-setup-script"
     echo
-    tyblue "----------------------------------注意事项---------------------------------"
+    tyblue "----------------------------------注意事项----------------------------------"
     yellow " 此脚本需要一个解析到本服务器的域名!!!!"
     tyblue " 推荐服务器系统使用Ubuntu最新版"
     yellow " 部分ssh工具会出现退格键无法使用问题，建议先保证退格键正常，再安装"
     yellow " 测试退格键正常方法：按一下退格键，不会出现奇怪的字符即为正常"
     yellow " 若退格键异常可以选择选项14修复"
-    tyblue "---------------------------------------------------------------------------"
+    tyblue "----------------------------------------------------------------------------"
     echo
     echo
     tyblue " -----------安装/升级/卸载-----------"
