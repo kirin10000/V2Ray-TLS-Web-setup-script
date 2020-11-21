@@ -1021,7 +1021,7 @@ install_update_v2ray()
 get_cert()
 {
     mv $v2ray_config $v2ray_config.bak
-    echo "{}" >> $v2ray_config
+    echo "{}" > $v2ray_config
     if [ $2 -eq 1 ]; then
         local temp="-d www.$1"
     else
@@ -1697,9 +1697,11 @@ install_update_v2ray_tls_web()
     systemctl enable v2ray
 
     green "正在获取证书。。。。"
-    [ -e $HOME/.acme.sh/acme.sh ] && $HOME/.acme.sh/acme.sh --uninstall
-    rm -rf $HOME/.acme.sh
-    curl https://get.acme.sh | sh
+    if [ $update -eq 0 ]; then
+        [ -e $HOME/.acme.sh/acme.sh ] && $HOME/.acme.sh/acme.sh --uninstall
+        rm -rf $HOME/.acme.sh
+        curl https://get.acme.sh | sh
+    fi
     $HOME/.acme.sh/acme.sh --upgrade --auto-upgrade
     get_all_certs
 
