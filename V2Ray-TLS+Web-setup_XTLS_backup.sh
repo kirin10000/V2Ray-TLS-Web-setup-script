@@ -1,11 +1,12 @@
 #!/bin/bash
 
 #安装选项
-nginx_version="nginx-1.19.4"
+nginx_version="nginx-1.19.5"
 openssl_version="openssl-openssl-3.0.0-alpha8"
 v2ray_config="/usr/local/etc/v2ray/config.json"
 nginx_prefix="/etc/nginx"
 nginx_config="${nginx_prefix}/conf.d/v2ray.conf"
+nginx_service="/etc/systemd/system/nginx.service"
 temp_dir="/temp_install_update_v2ray_tls_web"
 v2ray_is_installed=""
 nginx_is_installed=""
@@ -951,7 +952,7 @@ remove_nginx()
     ${nginx_prefix}/sbin/nginx -s stop
     pkill -9 nginx
     systemctl disable nginx
-    rm -rf /etc/systemd/system/nginx.service
+    rm -rf $nginx_service
     systemctl daemon-reload
     rm -rf ${nginx_prefix}
 }
@@ -1229,8 +1230,8 @@ EOF
 config_service_nginx()
 {
     systemctl disable nginx
-    rm -rf /etc/systemd/system/nginx.service
-cat > /etc/systemd/system/nginx.service << EOF
+    rm -rf $nginx_service
+cat > $nginx_service << EOF
 [Unit]
 Description=The NGINX HTTP and reverse proxy server
 After=syslog.target network-online.target remote-fs.target nss-lookup.target
@@ -1254,7 +1255,7 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
-    chmod 0644 /etc/systemd/system/nginx.service
+    chmod 0644 $nginx_service
     systemctl daemon-reload
     systemctl enable nginx
 }
