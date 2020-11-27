@@ -2,7 +2,7 @@
 
 #安装选项
 nginx_version="nginx-1.19.5"
-openssl_version="openssl-openssl-3.0.0-alpha8"
+openssl_version="openssl-openssl-3.0.0-alpha9"
 v2ray_config="/usr/local/etc/v2ray/config.json"
 nginx_prefix="/etc/nginx"
 nginx_config="${nginx_prefix}/conf.d/v2ray.conf"
@@ -33,7 +33,7 @@ redhat_version=""
 mem_ok=""
 
 #定义几个颜色
-purple()
+purple()                           #基佬紫
 {
     echo -e "\033[35;1m${@}\033[0m"
 }
@@ -88,7 +88,7 @@ if [ -e /usr/local/bin/v2ray ]; then
 else
     v2ray_is_installed=0
 fi
-if [ -e $nginx_config ]; then
+if [ -e $nginx_config ] || [ -e $nginx_prefix/conf.d/xray.conf ]; then
     nginx_is_installed=1
 else
     nginx_is_installed=0
@@ -203,6 +203,23 @@ check_SELinux()
     fi
 }
 
+#检查80端口和443端口是否被占用
+check_port()
+{
+    local i=2
+    local temp_port=443
+    while ((i!=0))
+    do
+        ((i--))
+        if netstat -tuln | tail -n +3 | awk '{print $4}' | awk -F : '{print $NF}' | grep -wq "$temp_port"; then
+            red "$temp_port端口被占用！"
+            yellow "请用 lsof -i:$temp_port 命令检查"
+            exit 1
+        fi
+        temp_port=80
+    done
+}
+
 #将域名列表转化为一个数组
 get_all_domains()
 {
@@ -219,9 +236,12 @@ get_all_domains()
 }
 
 #配置sshd
-setsshd()
+check_ssh_timeout()
 {
-    echo
+    if grep -q "#This file has been edited by v2ray-WebSocket-TLS-Web-setup-script" /etc/ssh/sshd_config; then
+        return 0
+    fi
+    echo -e "\n\n\n"
     tyblue "------------------------------------------"
     tyblue " 安装可能需要比较长的时间(5-40分钟)"
     tyblue " 如果中途断开连接将会很麻烦"
@@ -234,6 +254,8 @@ setsshd()
         read choice
     done
     if [ $choice == y ]; then
+        sed -i '/^[ \t]*ClientAliveInterval[ \t]/d' /etc/ssh/sshd_config
+        sed -i '/^[ \t]*ClientAliveCountMax[ \t]/d' /etc/ssh/sshd_config
         echo >> /etc/ssh/sshd_config
         echo "ClientAliveInterval 30" >> /etc/ssh/sshd_config
         echo "ClientAliveCountMax 60" >> /etc/ssh/sshd_config
@@ -335,9 +357,9 @@ doupdate()
         fi
         echo -e "\n\n\n"
         tyblue "------------------请选择升级系统版本--------------------"
-        tyblue " 1.最新beta版(现在是21.04)(2020.10)"
-        tyblue " 2.最新发行版(现在是20.10)(2020.10)"
-        tyblue " 3.最新LTS版(现在是20.04)(2020.10)"
+        tyblue " 1.最新beta版(现在是21.04)(2020.11)"
+        tyblue " 2.最新发行版(现在是20.10)(2020.11)"
+        tyblue " 3.最新LTS版(现在是20.04)(2020.11)"
         tyblue "-------------------------版本说明-------------------------"
         tyblue " beta版：即测试版"
         tyblue " 发行版：即稳定版"
@@ -836,22 +858,29 @@ readDomain()
     do
         read -p "您的选择是：" domainconfig
     done
-    case "$domainconfig" in
-        1)
-            echo
-            tyblue "--------------------请输入一级域名(不带www.，http，:，/)--------------------"
+    local queren=""
+    while [ "$queren" != "y" ]
+    do
+        echo
+        if [ $domainconfig -eq 1 ]; then
+            tyblue '---------请输入一级域名(前面不带"www."、"http://"或"https://")---------'
             read -p "请输入域名：" domain
             while check_domain $domain
             do
                 read -p "请输入域名：" domain
             done
-            ;;
-        2)
-            echo
-            tyblue "----------------请输入解析到此服务器的域名(不带http，:，/)----------------"
+        else
+            tyblue '-------请输入解析到此服务器的域名(前面不带"http://"或"https://")-------'
             read -p "请输入域名：" domain
-            ;;
-    esac
+        fi
+        echo
+        queren=""
+        while [ "$queren" != "y" -a "$queren" != "n" ]
+        do
+            tyblue "您输入的域名是\"$domain\"，确认吗？(y/n)"
+            read queren
+        done
+    done
     echo -e "\n\n\n"
     tyblue "------------------------------请选择要伪装的网站页面------------------------------"
     tyblue " 1. 403页面 (模拟网站后台)"
@@ -936,8 +965,8 @@ backup_domains_web()
 remove_v2ray()
 {
     systemctl stop v2ray
-    bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) --remove
     systemctl disable v2ray
+    bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) --remove
     rm -rf /usr/bin/v2ray
     rm -rf /etc/v2ray
     rm -rf /usr/local/bin/v2ray
@@ -994,7 +1023,7 @@ install_nginx()
 install_update_v2ray()
 {
     green "正在安装/更新V2Ray。。。。"
-    if ! bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) && ! bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh); then
+    if ! bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) --version v4.32.1 && ! bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) --version v4.32.1; then
         red    "安装/更新V2Ray失败"
         yellow "按回车键继续或者按ctrl+c终止"
         read -s
@@ -1447,13 +1476,11 @@ echo_end()
         purple "   (Qv2ray:首选项-入站设置-SOCKS设置-嗅探)"
         tyblue "------------------------------------------------------------------------"
         echo
-        yellow " 请确保客户端V2Ray版本为v4.30.0+(VLESS在4.30.0版本中对UDP传输进行了一次更新，并且不向下兼容)"
-        yellow " 使用XLTS请确保客户端V2Ray版本为v4.31.0+(XTLS在4.31.0版本中对流控进行了一次升级，并且不向下兼容)"
-        echo
         green  " 目前支持支持XTLS的图形化客户端："
-        green  "   Windows    ：V2RayN  v3.26+  Qv2ray v2.7.0-pre1+"
-        green  "   Android    ：V2RayNG v1.4.8+"
-        green  "   Linux/MacOS：Qv2ray  v2.7.0-pre1+"
+        green  "   Windows    ：Qv2ray       v2.7.0-pre1+    V2RayN  v3.26+"
+        green  "   Android    ：V2RayNG      v1.4.8+"
+        green  "   Linux/MacOS：Qv2ray       v2.7.0-pre1+"
+        green  "   IOS        ：Shadowrocket v2.1.67+"
     fi
     if [ $protocol_2 -ne 0 ]; then
         echo
@@ -1497,13 +1524,11 @@ echo_end()
         tyblue "  Sniffing(流量探测)            ：建议开启"
         purple "   (Qv2ray:首选项-入站设置-SOCKS设置-嗅探)"
         tyblue "------------------------------------------------------------------------"
-        echo
-        if [ $protocol_2 -eq 2 ]; then
-            yellow " 使用 VMess-WebSocket+TLS+Web 时，请尽快将V2Ray升级至v4.28.0+以启用VMessAEAD"
-        else
-            yellow " 使用 VLESS-WebSocket+TLS+Web 时，请确保客户端V2Ray版本为v4.30.0+(VLESS在4.30.0版本中对UDP传输进行了一次更新，并且不向下兼容)"
-        fi
     fi
+    echo
+    yellow " 若使用VMess，请尽快将客户端升级至 Xray 或 V2Ray v4.28.0+ 以启用VMessAEAD"
+    yellow " 若使用VLESS，请确保客户端为 Xray 或 V2Ray v4.30.0+"
+    yellow " 若使用XTLS，请确保客户端为 Xray 或 V2Ray v4.31.0至v4.32.1"
     echo
     tyblue " 如果要更换被镜像的伪装网站"
     tyblue " 修改$nginx_config"
@@ -1587,11 +1612,16 @@ install_update_v2ray_tls_web()
                 fi
             fi
         else
-            if [ $release == "centos" ] && version_ge $systemVersion 8; then
-                if $redhat_package_manager --help | grep -q "\-\-enablerepo="; then
-                    local redhat_install_command="$redhat_package_manager -y --enablerepo=PowerTools install"
+            if [ $release == "centos" ] && version_ge $systemVersion 7; then
+                if version_ge $systemVersion 8; then
+                    local temp_repo="BaseOS,AppStream,epel,PowerTools"
                 else
-                    local redhat_install_command="$redhat_package_manager -y --enablerepo PowerTools install"
+                    local temp_repo="os"
+                fi
+                if $redhat_package_manager --help | grep -q "\-\-enablerepo="; then
+                    local redhat_install_command="$redhat_package_manager -y --enablerepo=$temp_repo install"
+                else
+                    local redhat_install_command="$redhat_package_manager -y --enablerepo $temp_repo install"
                 fi
             else
                 local redhat_install_command="$redhat_package_manager -y install"
@@ -1605,11 +1635,10 @@ install_update_v2ray_tls_web()
         fi
     }
     check_SELinux
-    if ! grep -q "#This file has been edited by v2ray-WebSocket-TLS-Web-setup-script" /etc/ssh/sshd_config; then
-        setsshd
-    fi
     systemctl stop nginx
     systemctl stop v2ray
+    check_port
+    check_ssh_timeout
     uninstall_firewall
     doupdate
     if ! grep -q "#This file has been edited by v2ray-WebSocket-TLS-Web-setup-script" /etc/sysctl.conf; then
@@ -1914,7 +1943,7 @@ start_menu()
         remove_nginx
         $HOME/.acme.sh/acme.sh --uninstall
         rm -rf $HOME/.acme.sh
-        green  "删除完成！"
+        green "删除完成！"
     elif [ $choice -eq 6 ]; then
         if systemctl is-active v2ray > /dev/null 2>&1 && systemctl is-active nginx > /dev/null 2>&1; then
             local temp_is_active=1
