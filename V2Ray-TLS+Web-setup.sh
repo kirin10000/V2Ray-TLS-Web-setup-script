@@ -1,11 +1,12 @@
 #!/bin/bash
 
 #安装选项
-nginx_version="nginx-1.19.4"
-openssl_version="openssl-openssl-3.0.0-alpha8"
+nginx_version="nginx-1.19.5"
+openssl_version="openssl-openssl-3.0.0-alpha9"
 v2ray_config="/usr/local/etc/v2ray/config.json"
 nginx_prefix="/etc/nginx"
 nginx_config="${nginx_prefix}/conf.d/v2ray.conf"
+nginx_service="/etc/systemd/system/nginx.service"
 temp_dir="/temp_install_update_v2ray_tls_web"
 v2ray_is_installed=""
 nginx_is_installed=""
@@ -32,7 +33,7 @@ redhat_version=""
 mem_ok=""
 
 #定义几个颜色
-purple()
+purple()                           #基佬紫
 {
     echo -e "\033[35;1m${@}\033[0m"
 }
@@ -87,7 +88,7 @@ if [ -e /usr/local/bin/v2ray ]; then
 else
     v2ray_is_installed=0
 fi
-if [ -e $nginx_config ]; then
+if [ -e $nginx_config ] || [ -e $nginx_prefix/conf.d/xray.conf ]; then
     nginx_is_installed=1
 else
     nginx_is_installed=0
@@ -202,6 +203,23 @@ check_SELinux()
     fi
 }
 
+#检查80端口和443端口是否被占用
+check_port()
+{
+    local i=2
+    local temp_port=443
+    while ((i!=0))
+    do
+        ((i--))
+        if netstat -tuln | tail -n +3 | awk '{print $4}' | awk -F : '{print $NF}' | grep -wq "$temp_port"; then
+            red "$temp_port端口被占用！"
+            yellow "请用 lsof -i:$temp_port 命令检查"
+            exit 1
+        fi
+        temp_port=80
+    done
+}
+
 #将域名列表转化为一个数组
 get_all_domains()
 {
@@ -218,9 +236,12 @@ get_all_domains()
 }
 
 #配置sshd
-setsshd()
+check_ssh_timeout()
 {
-    echo
+    if grep -q "#This file has been edited by v2ray-WebSocket-TLS-Web-setup-script" /etc/ssh/sshd_config; then
+        return 0
+    fi
+    echo -e "\n\n\n"
     tyblue "------------------------------------------"
     tyblue " 安装可能需要比较长的时间(5-40分钟)"
     tyblue " 如果中途断开连接将会很麻烦"
@@ -233,6 +254,8 @@ setsshd()
         read choice
     done
     if [ $choice == y ]; then
+        sed -i '/^[ \t]*ClientAliveInterval[ \t]/d' /etc/ssh/sshd_config
+        sed -i '/^[ \t]*ClientAliveCountMax[ \t]/d' /etc/ssh/sshd_config
         echo >> /etc/ssh/sshd_config
         echo "ClientAliveInterval 30" >> /etc/ssh/sshd_config
         echo "ClientAliveCountMax 60" >> /etc/ssh/sshd_config
@@ -334,9 +357,9 @@ doupdate()
         fi
         echo -e "\n\n\n"
         tyblue "------------------请选择升级系统版本--------------------"
-        tyblue " 1.最新beta版(现在是21.04)(2020.10)"
-        tyblue " 2.最新发行版(现在是20.10)(2020.10)"
-        tyblue " 3.最新LTS版(现在是20.04)(2020.10)"
+        tyblue " 1.最新beta版(现在是21.04)(2020.11)"
+        tyblue " 2.最新发行版(现在是20.10)(2020.11)"
+        tyblue " 3.最新LTS版(现在是20.04)(2020.11)"
         tyblue "-------------------------版本说明-------------------------"
         tyblue " beta版：即测试版"
         tyblue " 发行版：即稳定版"
@@ -835,22 +858,29 @@ readDomain()
     do
         read -p "您的选择是：" domainconfig
     done
-    case "$domainconfig" in
-        1)
-            echo
-            tyblue "--------------------请输入一级域名(不带www.，http，:，/)--------------------"
+    local queren=""
+    while [ "$queren" != "y" ]
+    do
+        echo
+        if [ $domainconfig -eq 1 ]; then
+            tyblue '---------请输入一级域名(前面不带"www."、"http://"或"https://")---------'
             read -p "请输入域名：" domain
             while check_domain $domain
             do
                 read -p "请输入域名：" domain
             done
-            ;;
-        2)
-            echo
-            tyblue "----------------请输入解析到此服务器的域名(不带http，:，/)----------------"
+        else
+            tyblue '-------请输入解析到此服务器的域名(前面不带"http://"或"https://")-------'
             read -p "请输入域名：" domain
-            ;;
-    esac
+        fi
+        echo
+        queren=""
+        while [ "$queren" != "y" -a "$queren" != "n" ]
+        do
+            tyblue "您输入的域名是\"$domain\"，确认吗？(y/n)"
+            read queren
+        done
+    done
     echo -e "\n\n\n"
     tyblue "------------------------------请选择要伪装的网站页面------------------------------"
     tyblue " 1. 403页面 (模拟网站后台)"
@@ -934,8 +964,8 @@ backup_domains_web()
 remove_v2ray()
 {
     systemctl stop v2ray
-    bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) --remove
     systemctl disable v2ray
+    bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) --remove
     rm -rf /usr/bin/v2ray
     rm -rf /etc/v2ray
     rm -rf /usr/local/bin/v2ray
@@ -950,7 +980,7 @@ remove_nginx()
     ${nginx_prefix}/sbin/nginx -s stop
     pkill -9 nginx
     systemctl disable nginx
-    rm -rf /etc/systemd/system/nginx.service
+    rm -rf $nginx_service
     systemctl daemon-reload
     rm -rf ${nginx_prefix}
 }
@@ -1228,8 +1258,8 @@ EOF
 config_service_nginx()
 {
     systemctl disable nginx
-    rm -rf /etc/systemd/system/nginx.service
-cat > /etc/systemd/system/nginx.service << EOF
+    rm -rf $nginx_service
+cat > $nginx_service << EOF
 [Unit]
 Description=The NGINX HTTP and reverse proxy server
 After=syslog.target network-online.target remote-fs.target nss-lookup.target
@@ -1253,7 +1283,7 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
-    chmod 0644 /etc/systemd/system/nginx.service
+    chmod 0644 $nginx_service
     systemctl daemon-reload
     systemctl enable nginx
 }
@@ -1578,11 +1608,16 @@ install_update_v2ray_tls_web()
                 fi
             fi
         else
-            if [ $release == "centos" ] && version_ge $systemVersion 8; then
-                if $redhat_package_manager --help | grep -q "\-\-enablerepo="; then
-                    local redhat_install_command="$redhat_package_manager -y --enablerepo=PowerTools install"
+            if [ $release == "centos" ] && version_ge $systemVersion 7; then
+                if version_ge $systemVersion 8; then
+                    local temp_repo="BaseOS,AppStream,epel,PowerTools"
                 else
-                    local redhat_install_command="$redhat_package_manager -y --enablerepo PowerTools install"
+                    local temp_repo="os"
+                fi
+                if $redhat_package_manager --help | grep -q "\-\-enablerepo="; then
+                    local redhat_install_command="$redhat_package_manager -y --enablerepo=$temp_repo install"
+                else
+                    local redhat_install_command="$redhat_package_manager -y --enablerepo $temp_repo install"
                 fi
             else
                 local redhat_install_command="$redhat_package_manager -y install"
@@ -1596,11 +1631,10 @@ install_update_v2ray_tls_web()
         fi
     }
     check_SELinux
-    if ! grep -q "#This file has been edited by v2ray-WebSocket-TLS-Web-setup-script" /etc/ssh/sshd_config; then
-        setsshd
-    fi
     systemctl stop nginx
     systemctl stop v2ray
+    check_port
+    check_ssh_timeout
     uninstall_firewall
     doupdate
     if ! grep -q "#This file has been edited by v2ray-WebSocket-TLS-Web-setup-script" /etc/sysctl.conf; then
@@ -1905,7 +1939,7 @@ start_menu()
         remove_nginx
         $HOME/.acme.sh/acme.sh --uninstall
         rm -rf $HOME/.acme.sh
-        green  "删除完成！"
+        green "删除完成！"
     elif [ $choice -eq 6 ]; then
         if systemctl is-active v2ray > /dev/null 2>&1 && systemctl is-active nginx > /dev/null 2>&1; then
             local temp_is_active=1
