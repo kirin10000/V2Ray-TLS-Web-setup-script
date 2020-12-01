@@ -160,7 +160,7 @@ get_system_info()
     elif lsb_release -a 2>/dev/null | grep -qi "fedora"; then
         release="fedora"
     fi
-    systemVersion=`lsb_release -r -s`
+    systemVersion=$(lsb_release -r -s)
     if [ $release == "fedora" ]; then
         if version_ge $systemVersion 28; then
             redhat_version=8
@@ -174,6 +174,36 @@ get_system_info()
     else
         redhat_version=$systemVersion
     fi
+}
+
+#检查Nginx是否已通过apt/dnf/yum安装
+check_nginx()
+{
+    if [[ ! -f /usr/lib/systemd/system/nginx.service ]] && [[ ! -f /lib/systemd/system/nginx.service ]]; then
+        return 0
+    fi
+    red    "------------检测到Nginx已安装，并且会与此脚本冲突------------"
+    yellow " 如果您不记得之前有安装过Nginx，那么可能是使用别的一键脚本时安装的"
+    yellow " 建议使用纯净的系统运行此脚本"
+    echo
+    local choice=""
+    while [ "$choice" != "y" -a "$choice" != "n" ]
+    do
+        tyblue "是否尝试卸载？(y/n)"
+        read choice
+    done
+    if [ $choice == "n" ]; then
+        exit 0
+    fi
+    apt -y purge nginx
+    $redhat_package_manager -y remove nginx
+    if [[ ! -f /usr/lib/systemd/system/nginx.service ]] && [[ ! -f /lib/systemd/system/nginx.service ]]; then
+        return 0
+    fi
+    red "卸载失败！"
+    yellow "请尝试更换系统，建议使用Ubuntu最新版系统"
+    green  "欢迎进行Bug report(https://github.com/kirin10000/V2Ray-TLS-Web-setup-script/issues)，感谢您的支持"
+    exit 1
 }
 
 #检查SELinux
@@ -493,7 +523,7 @@ install_bbr()
         local kernel_list_temp=($(timeout 60 wget -qO- https://kernel.ubuntu.com/~kernel-ppa/mainline/ | awk -F'\"v' '/v[0-9]/{print $2}' | cut -d '"' -f1 | cut -d '/' -f1 | sort -rV))
         if [ ${#kernel_list_temp[@]} -le 1 ]; then
             latest_kernel_version="error"
-            your_kernel_version=`uname -r | cut -d - -f 1`
+            your_kernel_version=$(uname -r | cut -d - -f 1)
             return 1
         fi
         local i=0
@@ -549,7 +579,7 @@ install_bbr()
             done
         fi
         latest_kernel_version=${kernel_list[0]}
-        your_kernel_version=`uname -r | cut -d - -f 1`
+        your_kernel_version=$(uname -r | cut -d - -f 1)
         check_fake_version()
         {
             local temp=${1##*.}
@@ -564,7 +594,7 @@ install_bbr()
             your_kernel_version=${your_kernel_version%.*}
         done
         if [ $release == "ubuntu" ] || [ $release == "other-debian" ]; then
-            local rc_version=`uname -r | cut -d - -f 2`
+            local rc_version=$(uname -r | cut -d - -f 2)
             if [[ $rc_version =~ "rc" ]]; then
                 rc_version=${rc_version##*'rc'}
                 your_kernel_version=${your_kernel_version}-rc${rc_version}
@@ -579,7 +609,7 @@ install_bbr()
         if [ $release == "ubuntu" ] || [ $release == "other-debian" ]; then
             local kernel_list_image=($(dpkg --list | grep 'linux-image' | awk '{print $2}'))
             local kernel_list_modules=($(dpkg --list | grep 'linux-modules' | awk '{print $2}'))
-            local kernel_now=`uname -r`
+            local kernel_now=$(uname -r)
             local ok_install=0
             for ((i=${#kernel_list_image[@]}-1;i>=0;i--))
             do
@@ -620,7 +650,7 @@ install_bbr()
                 local kernel_list_modules=($(rpm -qa |grep '^kernel-modules\|^kernel-ml-modules'))
                 local kernel_list_core=($(rpm -qa | grep '^kernel-core\|^kernel-ml-core'))
             fi
-            local kernel_now=`uname -r`
+            local kernel_now=$(uname -r)
             local ok_install=0
             for ((i=${#kernel_list[@]}-1;i>=0;i--))
             do
@@ -719,7 +749,7 @@ install_bbr()
         fi
         tyblue "  bbr启用状态："
         if sysctl net.ipv4.tcp_congestion_control | grep -Eq "bbr|nanqinlang|tsunami"; then
-            local bbr_info=`sysctl net.ipv4.tcp_congestion_control`
+            local bbr_info=$(sysctl net.ipv4.tcp_congestion_control)
             bbr_info=${bbr_info#*=}
             if [ $bbr_info == nanqinlang ]; then
                 bbr_info="暴力bbr魔改版"
@@ -1007,6 +1037,38 @@ install_nginx()
     make install
     cd ..
 }
+config_service_nginx()
+{
+    systemctl disable nginx
+    rm -rf $nginx_service
+cat > $nginx_service << EOF
+[Unit]
+Description=The NGINX HTTP and reverse proxy server
+After=syslog.target network-online.target remote-fs.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=root
+ExecStartPre=/bin/rm -rf /dev/shm/nginx_unixsocket
+ExecStartPre=/bin/mkdir /dev/shm/nginx_unixsocket
+ExecStartPre=/bin/chmod 711 /dev/shm/nginx_unixsocket
+ExecStartPre=/bin/rm -rf /dev/shm/nginx_tcmalloc
+ExecStartPre=/bin/mkdir /dev/shm/nginx_tcmalloc
+ExecStartPre=/bin/chmod 0777 /dev/shm/nginx_tcmalloc
+ExecStart=${nginx_prefix}/sbin/nginx
+ExecStop=${nginx_prefix}/sbin/nginx -s stop
+ExecStopPost=/bin/rm -rf /dev/shm/nginx_tcmalloc
+ExecStopPost=/bin/rm -rf /dev/shm/nginx_unixsocket
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    chmod 0644 $nginx_service
+    systemctl daemon-reload
+    systemctl enable nginx
+}
 
 #安装/更新V2Ray
 install_update_v2ray()
@@ -1047,8 +1109,8 @@ get_cert()
     else
         local temp=""
     fi
-    if ! $HOME/.acme.sh/acme.sh --issue -d $1 $temp -w ${nginx_prefix}/html -k ec-256 -ak ec-256 --pre-hook "mv ${nginx_prefix}/conf/nginx.conf ${nginx_prefix}/conf/nginx.conf.bak && cp ${nginx_prefix}/conf/nginx.conf.default ${nginx_prefix}/conf/nginx.conf && sleep 2s && systemctl restart nginx" --post-hook "mv ${nginx_prefix}/conf/nginx.conf.bak ${nginx_prefix}/conf/nginx.conf && sleep 2s && systemctl restart nginx" --ocsp; then
-        $HOME/.acme.sh/acme.sh --issue -d $1 $temp -w ${nginx_prefix}/html -k ec-256 -ak ec-256 --pre-hook "mv ${nginx_prefix}/conf/nginx.conf ${nginx_prefix}/conf/nginx.conf.bak && cp ${nginx_prefix}/conf/nginx.conf.default ${nginx_prefix}/conf/nginx.conf && sleep 2s && systemctl restart nginx" --post-hook "mv ${nginx_prefix}/conf/nginx.conf.bak ${nginx_prefix}/conf/nginx.conf && sleep 2s && systemctl restart nginx" --ocsp --debug
+    if ! $HOME/.acme.sh/acme.sh --issue -d $1 $temp -w ${nginx_prefix}/html/issue_certs -k ec-256 -ak ec-256 --pre-hook "mv ${nginx_prefix}/conf/nginx.conf ${nginx_prefix}/conf/nginx.conf.bak && cp ${nginx_prefix}/conf/issue_certs.conf ${nginx_prefix}/conf/nginx.conf && sleep 2s && systemctl restart nginx" --post-hook "mv ${nginx_prefix}/conf/nginx.conf.bak ${nginx_prefix}/conf/nginx.conf && sleep 2s && systemctl restart nginx" --ocsp; then
+        $HOME/.acme.sh/acme.sh --issue -d $1 $temp -w ${nginx_prefix}/html/issue_certs -k ec-256 -ak ec-256 --pre-hook "mv ${nginx_prefix}/conf/nginx.conf ${nginx_prefix}/conf/nginx.conf.bak && cp ${nginx_prefix}/conf/issue_certs.conf ${nginx_prefix}/conf/nginx.conf && sleep 2s && systemctl restart nginx" --post-hook "mv ${nginx_prefix}/conf/nginx.conf.bak ${nginx_prefix}/conf/nginx.conf && sleep 2s && systemctl restart nginx" --ocsp --debug
     fi
     if id nobody | grep -qw 'nogroup'; then
         temp="chown -R nobody:nogroup ${nginx_prefix}/certs"
@@ -1230,6 +1292,7 @@ EOF
         else
             echo "    server_name ${domain_list[i]};" >> $nginx_config
         fi
+        echo '    add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload" always;' >> $nginx_config
         if [ ${pretend_list[i]} -eq 1 ]; then
             echo "    return 403;" >> $nginx_config
         elif [ ${pretend_list[i]} -eq 2 ]; then
@@ -1244,38 +1307,6 @@ EOF
         fi
         echo "}" >> $nginx_config
     done
-}
-config_service_nginx()
-{
-    systemctl disable nginx
-    rm -rf $nginx_service
-cat > $nginx_service << EOF
-[Unit]
-Description=The NGINX HTTP and reverse proxy server
-After=syslog.target network-online.target remote-fs.target nss-lookup.target
-Wants=network-online.target
-
-[Service]
-Type=forking
-User=root
-ExecStartPre=/bin/rm -rf /dev/shm/nginx_unixsocket
-ExecStartPre=/bin/mkdir /dev/shm/nginx_unixsocket
-ExecStartPre=/bin/chmod 711 /dev/shm/nginx_unixsocket
-ExecStartPre=/bin/rm -rf /dev/shm/nginx_tcmalloc
-ExecStartPre=/bin/mkdir /dev/shm/nginx_tcmalloc
-ExecStartPre=/bin/chmod 0777 /dev/shm/nginx_tcmalloc
-ExecStart=${nginx_prefix}/sbin/nginx
-ExecStop=${nginx_prefix}/sbin/nginx -s stop
-ExecStopPost=/bin/rm -rf /dev/shm/nginx_tcmalloc
-ExecStopPost=/bin/rm -rf /dev/shm/nginx_unixsocket
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    chmod 0644 $nginx_service
-    systemctl daemon-reload
-    systemctl enable nginx
 }
 
 #配置v2ray
@@ -1523,7 +1554,7 @@ echo_end()
     tyblue " 修改$nginx_config"
     tyblue " 将v.qq.com修改为你要镜像的网站"
     echo
-    tyblue " 脚本最后更新时间：2020.11.07"
+    tyblue " 脚本最后更新时间：2020.12.01"
     echo
     red    " 此脚本仅供交流学习使用，请勿使用此脚本行违法之事。网络非法外之地，行非法之事，必将接受法律制裁!!!!"
     tyblue " 2020.08"
@@ -1532,9 +1563,9 @@ echo_end()
 #获取配置信息 protocol_1 v2id_1 protocol_2 v2id_2 path
 get_base_information()
 {
-    if [ $(grep "clients" $v2ray_config | wc -l) -eq 2 ] || [ $(grep -E "vmess|vless" $v2ray_config | wc -l) -eq 1 ]; then
+    if [ $(grep '"clients"' $v2ray_config | wc -l) -eq 2 ] || [ $(grep -E '"(vmess|vless)"' $v2ray_config | wc -l) -eq 1 ]; then
         protocol_1=1
-        v2id_1=`grep id $v2ray_config | head -n 1`
+        v2id_1=$(grep '"id"' $v2ray_config | head -n 1)
         v2id_1=${v2id_1##*' '}
         v2id_1=${v2id_1#*'"'}
         v2id_1=${v2id_1%'"'*}
@@ -1542,13 +1573,13 @@ get_base_information()
         protocol_1=0
         v2id_1=""
     fi
-    if [ $(grep -E "vmess|vless" $v2ray_config | wc -l) -eq 2 ]; then
-        grep -q "vmess" $v2ray_config && protocol_2=2 || protocol_2=1
-        path=`grep path $v2ray_config`
+    if [ $(grep -E '"(vmess|vless)"' $v2ray_config | wc -l) -eq 2 ]; then
+        grep -q '"vmess"' $v2ray_config && protocol_2=2 || protocol_2=1
+        path=$(grep '"path"' $v2ray_config)
         path=${path##*' '}
         path=${path#*'"'}
         path=${path%'"'*}
-        v2id_2=`grep id $v2ray_config | tail -n 1`
+        v2id_2=$(grep '"id"' $v2ray_config | tail -n 1)
         v2id_2=${v2id_2##*' '}
         v2id_2=${v2id_2#*'"'}
         v2id_2=${v2id_2%'"'*}
@@ -1563,21 +1594,21 @@ get_base_information()
 get_domainlist()
 {
     unset domain_list
-    domain_list=($(grep server_name $nginx_config | sed 's/;//g' | awk 'NR>1 {print $NF}'))
+    domain_list=($(grep "^[ \t]*server_name[ \t].*;[ \t]*$" $nginx_config | sed 's/;//g' | awk 'NR>1 {print $NF}'))
     local line
     local i
     for i in ${!domain_list[@]}
     do
-        line=`grep -n "server_name www.${domain_list[i]} ${domain_list[i]};" $nginx_config | tail -n 1 | awk -F : '{print $1}'`
+        line=$(grep -n "server_name www.${domain_list[i]} ${domain_list[i]};" $nginx_config | tail -n 1 | awk -F : '{print $1}')
         if [ "$line" == "" ]; then
-            line=`grep -n "server_name ${domain_list[i]};" $nginx_config | tail -n 1 | awk -F : '{print $1}'`
+            line=$(grep -n "server_name ${domain_list[i]};" $nginx_config | tail -n 1 | awk -F : '{print $1}')
             domainconfig_list[i]=2
         else
             domainconfig_list[i]=1
         fi
-        if awk 'NR=='"$(($line+1))"' {print $0}' $nginx_config | grep -q "return 403"; then
+        if awk 'NR=='"$(($line+2))"' {print $0}' $nginx_config | grep -q "return 403"; then
             pretend_list[i]=1
-        elif awk 'NR=='"$(($line+1))"' {print $0}' $nginx_config | grep -q "location / {"; then
+        elif awk 'NR=='"$(($line+2))"' {print $0}' $nginx_config | grep -q "location / {"; then
             pretend_list[i]=2
         else
             pretend_list[i]=3
@@ -1623,10 +1654,14 @@ install_update_v2ray_tls_web()
             fi
         fi
     }
-    check_SELinux
     systemctl stop nginx
     systemctl stop v2ray
     check_port
+    apt -y -f install
+    get_system_info
+    check_important_dependence_installed ca-certificates ca-certificates
+    check_nginx
+    check_SELinux
     check_ssh_timeout
     uninstall_firewall
     doupdate
@@ -1711,11 +1746,25 @@ install_update_v2ray_tls_web()
         else
             rm -rf ${nginx_prefix}/conf.d
             rm -rf ${nginx_prefix}/certs
+            rm -rf ${nginx_prefix}/html/issue_certs
+            rm -rf ${nginx_prefix}/conf/issue_certs.conf
             cp ${nginx_prefix}/conf/nginx.conf.default ${nginx_prefix}/conf/nginx.conf
         fi
     fi
     mkdir ${nginx_prefix}/conf.d
     mkdir ${nginx_prefix}/certs
+    mkdir ${nginx_prefix}/html/issue_certs
+cat > ${nginx_prefix}/conf/issue_certs.conf << EOF
+events {
+    worker_connections  1024;
+}
+http {
+    server {
+        listen [::]:80 ipv6only=off;
+        root ${nginx_prefix}/html/issue_certs;
+    }
+}
+EOF
     config_service_nginx
 
 #安装V2Ray
@@ -1735,8 +1784,8 @@ install_update_v2ray_tls_web()
     if [ $update == 0 ]; then
         path=$(cat /dev/urandom | head -c 8 | md5sum | head -c 7)
         path="/$path"
-        v2id_1=`cat /proc/sys/kernel/random/uuid`
-        v2id_2=`cat /proc/sys/kernel/random/uuid`
+        v2id_1=$(cat /proc/sys/kernel/random/uuid)
+        v2id_2=$(cat /proc/sys/kernel/random/uuid)
     fi
     config_nginx
     config_v2ray
@@ -1770,11 +1819,11 @@ start_menu()
             red "传输协议未更换"
             return 0
         fi
-        [ $protocol_1_old -eq 0 ] && [ $protocol_1 -ne 0 ] && v2id_1=`cat /proc/sys/kernel/random/uuid`
+        [ $protocol_1_old -eq 0 ] && [ $protocol_1 -ne 0 ] && v2id_1=$(cat /proc/sys/kernel/random/uuid)
         if [ $protocol_2_old -eq 0 ] && [ $protocol_2 -ne 0 ]; then
             path=$(cat /dev/urandom | head -c 8 | md5sum | head -c 7)
             path="/$path"
-            v2id_2=`cat /proc/sys/kernel/random/uuid`
+            v2id_2=$(cat /proc/sys/kernel/random/uuid)
         fi
         get_domainlist
         config_v2ray
@@ -1883,31 +1932,27 @@ start_menu()
     do
         read -p "您的选择是：" choice
     done
-    if [ $choice -le 5 ] || [ $choice -eq 9 ] || [ $choice -eq 10 ]; then
-        apt -y -f install
-        get_system_info
-        check_important_dependence_installed ca-certificates ca-certificates
-    fi
     if [ $choice -eq 1 ]; then
         install_update_v2ray_tls_web
     elif [ $choice -eq 2 ]; then
-        if [ $is_installed == 1 ]; then
-            if [ $release == ubuntu ]; then
-                yellow "升级bbr/系统可能需要重启，重启后请再次选择'升级V2Ray-TLS+Web'"
-            else
-                yellow "升级bbr可能需要重启，重启后请再次选择'升级V2Ray-TLS+Web'"
-            fi
-            yellow "按回车键继续，或者ctrl+c中止"
-            read -s
-        else
+        if [ $is_installed == 0 ]; then
             red "请先安装V2Ray-TLS+Web！！"
             exit 1
         fi
+        yellow "升级bbr/系统可能需要重启，重启后请再次选择'升级Xray-TLS+Web'"
+        yellow "按回车键继续，或者ctrl+c中止"
+        read -s
         rm -rf "$0"
-        wget -O "$0" "https://github.com/kirin10000/V2Ray-TLS-Web-setup-script/raw/master/V2Ray-TLS+Web-setup.sh"
+        if ! wget -O "$0" "https://github.com/kirin10000/V2Ray-TLS-Web-setup-script/raw/master/V2Ray-TLS+Web-setup.sh" && ! wget -O "$0" "https://github.com/kirin10000/V2Ray-TLS-Web-setup-script/raw/master/V2Ray-TLS+Web-setup.sh"; then
+            red "获取最新脚本失败！"
+            exit 1
+        fi
         chmod +x "$0"
         "$0" --update
     elif [ $choice -eq 3 ]; then
+        apt -y -f install
+        get_system_info
+        check_important_dependence_installed ca-certificates ca-certificates
         enter_temp_dir
         install_bbr
         apt -y -f install
@@ -1980,6 +2025,7 @@ start_menu()
         $HOME/.acme.sh/acme.sh --uninstall
         rm -rf $HOME/.acme.sh
         curl https://get.acme.sh | sh
+        $HOME/.acme.sh/acme.sh --upgrade --auto-upgrade
         get_base_information
         get_domainlist
         for i in ${!domain_list[@]}
@@ -2157,8 +2203,5 @@ if ! [ "$1" == "--update" ]; then
     start_menu
 else
     update=1
-    apt -y -f install
-    get_system_info
-    check_important_dependence_installed ca-certificates ca-certificates
     install_update_v2ray_tls_web
 fi
