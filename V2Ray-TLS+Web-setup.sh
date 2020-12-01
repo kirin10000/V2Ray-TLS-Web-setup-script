@@ -1935,7 +1935,7 @@ start_menu()
             red "请先安装V2Ray-TLS+Web！！"
             exit 1
         fi
-        yellow "升级bbr/系统可能需要重启，重启后请再次选择'升级Xray-TLS+Web'"
+        yellow "升级bbr/系统可能需要重启，重启后请再次选择'升级V2Ray-TLS+Web'"
         yellow "按回车键继续，或者ctrl+c中止"
         read -s
         rm -rf "$0"
