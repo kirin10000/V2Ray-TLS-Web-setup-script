@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #安装选项
-nginx_version="nginx-1.19.5"
+nginx_version="nginx-1.19.6"
 openssl_version="openssl-openssl-3.0.0-alpha9"
 v2ray_config="/usr/local/etc/v2ray/config.json"
 nginx_prefix="/etc/nginx"
@@ -74,8 +74,8 @@ if [[ ! -d /dev/shm ]]; then
     red "/dev/shm不存在，不支持的系统"
     exit 1
 fi
-if [ "$(cat /proc/meminfo |grep 'MemTotal' |awk '{print $3}' | tr [A-Z] [a-z])" == "kb" ]; then
-    if [ "$(cat /proc/meminfo |grep 'MemTotal' |awk '{print $2}')" -le 400000 ]; then
+if [ "$(cat /proc/meminfo | grep 'MemTotal' | awk '{print $3}' | tr [:upper:] [:lower:])" == "kb" ]; then
+    if [ "$(cat /proc/meminfo | grep 'MemTotal' | awk '{print $2}')" -le 400000 ]; then
         mem_ok=0
     else
         mem_ok=1
@@ -107,7 +107,7 @@ fi
 check_important_dependence_installed()
 {
     if [ $release == "ubuntu" ] || [ $release == "other-debian" ]; then
-        if ! dpkg -s $1 2>&1 >/dev/null; then
+        if ! dpkg -s $1 > /dev/null 2>&1; then
             if ! apt -y --no-install-recommends install $1; then
                 apt update
                 if ! apt -y --no-install-recommends install $1; then
@@ -118,7 +118,7 @@ check_important_dependence_installed()
             fi
         fi
     else
-        if ! rpm -q $2 2>&1 >/dev/null; then
+        if ! rpm -q $2 > /dev/null 2>&1; then
             if ! $redhat_package_manager -y install $2; then
                 yellow "重要组件安装失败！！"
                 red "不支持的系统！！"
@@ -410,7 +410,7 @@ doupdate()
         do
             read -p "您的选择是：" choice
         done
-        if ! [[ "$(cat /etc/ssh/sshd_config | grep -i "^[ \t]*port " | awk '{print $2}')" =~ ^("22"|"")$ ]]; then
+        if ! [[ "$(cat /etc/ssh/sshd_config | grep -i '^[ '$'\t]*port ' | awk '{print $2}')" =~ ^("22"|"")$ ]]; then
             red "检测到ssh端口号被修改"
             red "升级系统后ssh端口号可能恢复默认值(22)"
             yellow "按回车键继续。。。"
@@ -1263,8 +1263,8 @@ config_nginx()
     get_all_domains
 cat > $nginx_config<<EOF
 server {
-    listen 80 fastopen=100 reuseport default_server;
-    listen [::]:80 fastopen=100 reuseport default_server;
+    listen 80 reuseport default_server;
+    listen [::]:80 reuseport default_server;
     return 301 https://${all_domains[0]};
 }
 server {
@@ -1327,8 +1327,7 @@ EOF
 cat >> $v2ray_config <<EOF
                 "clients": [
                     {
-                        "id": "$v2id_1",
-                        "level": 2
+                        "id": "$v2id_1"
                     }
                 ],
 EOF
@@ -1339,20 +1338,17 @@ EOF
 cat >> $v2ray_config <<EOF
                     {
                         "path": "$path",
-                        "dest": "@/dev/shm/v2ray/ws.sock",
-                        "xver": 0
+                        "dest": "@/dev/shm/v2ray/ws.sock"
                     },
 EOF
     fi
 cat >> $v2ray_config <<EOF
                     {
-                        "dest": "/dev/shm/nginx_unixsocket/default.sock",
-                        "xver": 0
+                        "alpn": "h2",
+                        "dest": "/dev/shm/nginx_unixsocket/h2.sock"
                     },
                     {
-                        "alpn": "h2",
-                        "dest": "/dev/shm/nginx_unixsocket/h2.sock",
-                        "xver": 0
+                        "dest": "/dev/shm/nginx_unixsocket/default.sock"
                     }
                 ]
             },
@@ -1381,9 +1377,6 @@ EOF
     done
 cat >> $v2ray_config <<EOF
                     ]
-                },
-                "sockopt": {
-                    "tcpFastOpen": true
                 }
             }
 EOF
@@ -1399,8 +1392,7 @@ EOF
         echo '            "settings": {' >> $v2ray_config
         echo '                "clients": [' >> $v2ray_config
         echo '                    {' >> $v2ray_config
-        echo '                        "id": "'"$v2id_2"'",' >> $v2ray_config
-        echo '                        "level": 1' >> $v2ray_config
+        echo "                        \"id\": \"$v2id_2\"" >> $v2ray_config
         echo '                    }' >> $v2ray_config
         if [ $protocol_2 -eq 2 ]; then
             echo '                ]' >> $v2ray_config
@@ -1423,12 +1415,7 @@ cat >> $v2ray_config <<EOF
     ],
     "outbounds": [
         {
-            "protocol": "freedom",
-            "streamSettings": {
-                "sockopt": {
-                    "tcpFastOpen": true
-                }
-            }
+            "protocol": "freedom"
         }
     ]
 }
@@ -1482,12 +1469,11 @@ echo_end()
         if [ ${#all_domains[@]} -eq 1 ]; then
             tyblue "  serverName(验证服务端证书域名)：${all_domains[@]}"
         else
-            tyblue "  serverName(验证服务端证书域名)：${all_domains[@]} \033[35;1m(任选其一)"
+            tyblue "  serverName(验证服务端证书域名)：${all_domains[@]} \033[35m(任选其一)"
         fi
         purple "   (V2RayN(G):伪装域名;Qv2ray:TLS设置-服务器地址;Shadowrocket:Peer 名称)"
         tyblue "  allowInsecure                 ：false"
         purple "   (Qv2ray:允许不安全的证书(不打勾);Shadowrocket:允许不安全(关闭))"
-        tyblue "  tcpFastOpen(TCP快速打开)      ：可以启用"
         tyblue " ------------------------其他-----------------------"
         tyblue "  Mux(多路复用)                 ：建议关闭"
         tyblue "  Sniffing(流量探测)            ：建议开启"
@@ -1507,7 +1493,7 @@ echo_end()
         if [ ${#all_domains[@]} -eq 1 ]; then
             tyblue " address(地址)         ：${all_domains[@]}"
         else
-            tyblue " address(地址)         ：${all_domains[@]} \033[35;1m(任选其一)"
+            tyblue " address(地址)         ：${all_domains[@]} \033[35m(任选其一)"
         fi
         purple "  (Qv2ray:主机)"
         tyblue " port(端口)            ：443"
@@ -1532,7 +1518,6 @@ echo_end()
         purple "   (V2RayN(G):伪装域名;Qv2ray:TLS设置-服务器地址;Shadowrocket:Peer 名称)"
         tyblue "  allowInsecure                 ：false"
         purple "   (Qv2ray:允许不安全的证书(不打勾);Shadowrocket:允许不安全(关闭))"
-        tyblue "  tcpFastOpen(TCP快速打开)      ：可以启用"
         tyblue " ------------------------其他-----------------------"
         tyblue "  Mux(多路复用)                 ：建议关闭"
         tyblue "  Sniffing(流量探测)            ：建议开启"
@@ -1554,6 +1539,18 @@ echo_end()
     echo
     red    " 此脚本仅供交流学习使用，请勿使用此脚本行违法之事。网络非法外之地，行非法之事，必将接受法律制裁!!!!"
     tyblue " 2020.08"
+}
+
+#删除所有域名
+remove_all_domains()
+{
+    for i in ${!domain_list[@]}
+    do
+        rm -rf ${nginx_prefix}/html/${domain_list[$i]}
+    done
+    unset domain_list
+    unset domainconfig_list
+    unset pretend_list
 }
 
 #获取配置信息 protocol_1 v2id_1 protocol_2 v2id_2 path
@@ -1590,7 +1587,9 @@ get_base_information()
 get_domainlist()
 {
     unset domain_list
-    domain_list=($(grep "^[ \t]*server_name[ \t].*;[ \t]*$" $nginx_config | sed 's/;//g' | awk 'NR>1 {print $NF}'))
+    unset domainconfig_list
+    unset pretend_list
+    domain_list=($(grep '^[ '$'\t]*server_name[ '$'\t].*;' $nginx_config | cut -d ';' -f 1 | awk 'NR>1 {print $NF}'))
     local line
     local i
     for i in ${!domain_list[@]}
@@ -1628,21 +1627,18 @@ install_update_v2ray_tls_web()
                 fi
             fi
         else
-            if [ $release == "centos" ] && version_ge $systemVersion 7; then
-                if version_ge $systemVersion 8; then
-                    local temp_repo="BaseOS,AppStream,epel,PowerTools"
-                else
-                    local temp_repo="os"
-                fi
-                if $redhat_package_manager --help | grep -q "\-\-enablerepo="; then
-                    local redhat_install_command="$redhat_package_manager -y --enablerepo=$temp_repo install"
-                else
-                    local redhat_install_command="$redhat_package_manager -y --enablerepo $temp_repo install"
-                fi
+            if $redhat_package_manager --help | grep -q "\-\-enablerepo="; then
+                local temp_redhat_install="$redhat_package_manager -y --enablerepo="
             else
-                local redhat_install_command="$redhat_package_manager -y install"
+                local temp_redhat_install="$redhat_package_manager -y --enablerepo "
             fi
-            if ! $redhat_install_command $1; then
+            if ! $redhat_package_manager -y install $1; then
+                if [ "$release" == "centos" ] && version_ge $systemVersion 8 && $temp_redhat_install"epel,PowerTools" install $1;then
+                    return 0
+                fi
+                if $temp_redhat_install'*' install $1; then
+                    return 0
+                fi
                 yellow "依赖安装失败！！"
                 green  "欢迎进行Bug report(https://github.com/kirin10000/V2Ray-TLS-Web-setup-script/issues)，感谢您的支持"
                 yellow "按回车键继续或者ctrl+c退出"
@@ -1661,15 +1657,6 @@ install_update_v2ray_tls_web()
     check_ssh_timeout
     uninstall_firewall
     doupdate
-    if ! grep -q "#This file has been edited by v2ray-WebSocket-TLS-Web-setup-script" /etc/sysctl.conf; then
-        echo >> /etc/sysctl.conf
-        echo "#This file has been edited by v2ray-WebSocket-TLS-Web-setup-script" >> /etc/sysctl.conf
-    fi
-    if ! grep -Eq '^[ '$'\t]*net.ipv4.tcp_fastopen[ '$'\t]*=[ '$'\t]*3[ '$'\t]*$' /etc/sysctl.conf || ! sysctl net.ipv4.tcp_fastopen | grep -wq 3; then
-        sed -i '/^[ \t]*net.ipv4.tcp_fastopen[ \t]*=/d' /etc/sysctl.conf
-        echo 'net.ipv4.tcp_fastopen = 3' >> /etc/sysctl.conf
-        sysctl -p
-    fi
     enter_temp_dir
     install_bbr
     apt -y -f install
@@ -1722,24 +1709,40 @@ install_update_v2ray_tls_web()
     $redhat_package_manager clean all
 
 ##安装nginx
-    if [ $nginx_is_installed -eq 0 ] || [ $update -eq 1 ]; then
+    if [ $nginx_is_installed -eq 0 ]; then
         install_nginx
     else
-        tyblue "---------------检测到nginx已存在---------------"
-        tyblue " 1. 尝试使用现有nginx"
-        tyblue " 2. 卸载现有nginx并重新编译安装"
-        echo
-        yellow " 若安装完成后nginx无法启动，请卸载并重新安装"
-        green  " 若想更新nginx，请选择2"
-        echo
         choice=""
-        while [ "$choice" != "1" ] && [ "$choice" != "2" ]
-        do
-            read -p "您的选择是：" choice
-        done
-        if [ $choice -eq 2 ]; then
+        if [ $update -eq 1 ]; then
+            while [ "$choice" != "y" ] && [ "$choice" != "n" ]
+            do
+                tyblue "是否更新Nginx?(y/n)"
+                read choice
+            done
+        else
+            tyblue "---------------检测到nginx已存在---------------"
+            tyblue " 1. 尝试使用现有nginx"
+            tyblue " 2. 卸载现有nginx并重新编译安装"
+            echo
+            yellow " 若安装完成后Nginx无法启动，请卸载并重新安装"
+            echo
+            while [ "$choice" != "1" ] && [ "$choice" != "2" ]
+            do
+                read -p "您的选择是：" choice
+            done
+        fi
+        if [ "$choice" == "y" ] || [ "$choice" == "2" ]; then
             install_nginx
         else
+            [ $update -eq 1 ] && backup_domains_web
+            local temp_domain_bak=("${domain_list[@]}")
+            local temp_domainconfig_bak=("${domainconfig_list[@]}")
+            local temp_pretend_bak=("${pretend_list[@]}")
+            get_domainlist
+            remove_all_domains
+            domain_list=("${temp_domain_bak[@]}")
+            domainconfig_list=("${temp_domainconfig_bak[@]}")
+            pretend_list=("${temp_pretend_bak[@]}")
             rm -rf ${nginx_prefix}/conf.d
             rm -rf ${nginx_prefix}/certs
             rm -rf ${nginx_prefix}/html/issue_certs
@@ -1880,11 +1883,11 @@ start_menu()
     tyblue " 官网：https://github.com/kirin10000/V2Ray-TLS-Web-setup-script"
     echo
     tyblue "----------------------------------注意事项----------------------------------"
-    yellow " 此脚本需要一个解析到本服务器的域名!!!!"
-    tyblue " 推荐服务器系统使用Ubuntu最新版"
-    yellow " 部分ssh工具会出现退格键无法使用问题，建议先保证退格键正常，再安装"
-    yellow " 测试退格键正常方法：按一下退格键，不会出现奇怪的字符即为正常"
-    yellow " 若退格键异常可以选择选项14修复"
+    yellow " 1. 此脚本需要一个解析到本服务器的域名"
+    tyblue " 2. 此脚本安装时间较长，详细原因见："
+    tyblue "       https://github.com/kirin10000/V2Ray-TLS-Web-setup-script#安装时长说明"
+    green  " 3. 建议使用纯净的系统 (VPS控制台-重置系统)"
+    green  " 4. 推荐使用Ubuntu最新版系统"
     tyblue "----------------------------------------------------------------------------"
     echo
     echo
@@ -2024,13 +2027,7 @@ start_menu()
         $HOME/.acme.sh/acme.sh --upgrade --auto-upgrade
         get_base_information
         get_domainlist
-        for i in ${!domain_list[@]}
-        do
-            rm -rf ${nginx_prefix}/html/${domain_list[$i]}
-        done
-        unset domain_list
-        unset domainconfig_list
-        unset pretend_list
+        remove_all_domains
         readDomain
         get_all_certs
         get_all_webs
