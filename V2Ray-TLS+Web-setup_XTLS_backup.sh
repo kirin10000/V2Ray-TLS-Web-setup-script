@@ -4,7 +4,7 @@
 nginx_version="nginx-1.19.6"
 openssl_version="openssl-openssl-3.0.0-alpha9"
 v2ray_config="/usr/local/etc/v2ray/config.json"
-nginx_prefix="/etc/nginx"
+nginx_prefix="/usr/local/nginx"
 nginx_config="${nginx_prefix}/conf.d/v2ray.conf"
 nginx_service="/etc/systemd/system/nginx.service"
 temp_dir="/temp_install_update_v2ray_tls_web"
@@ -12,6 +12,10 @@ v2ray_is_installed=""
 nginx_is_installed=""
 is_installed=""
 update=""
+if [ -e /etc/nginx/conf.d/v2ray.conf ] || [ -e /etc/nginx/conf.d/xray.conf ]; then
+    nginx_prefix="/etc/nginx"
+    nginx_config="${nginx_prefix}/conf.d/v2ray.conf"
+fi
 
 #配置信息
 unset domain_list
@@ -107,23 +111,25 @@ fi
 check_important_dependence_installed()
 {
     if [ $release == "ubuntu" ] || [ $release == "other-debian" ]; then
-        if ! dpkg -s $1 > /dev/null 2>&1; then
+        if dpkg -s $1 > /dev/null 2>&1; then
+            apt-mark manual $1
+        elif ! apt -y --no-install-recommends install $1; then
+            apt update
             if ! apt -y --no-install-recommends install $1; then
-                apt update
-                if ! apt -y --no-install-recommends install $1; then
-                    yellow "重要组件安装失败！！"
-                    red "不支持的系统！！"
-                    exit 1
-                fi
+                red "重要组件\"$1\"安装失败！！"
+                exit 1
             fi
         fi
     else
         if ! rpm -q $2 > /dev/null 2>&1; then
-            if ! $redhat_package_manager -y install $2; then
-                yellow "重要组件安装失败！！"
-                red "不支持的系统！！"
-                exit 1
+            if [ "$redhat_package_manager" == "dnf" ]; then
+                dnf mark install $2
+            else
+                yumdb set reason user $2
             fi
+        elif ! $redhat_package_manager -y install $2; then
+            red "重要组件\"$2\"安装失败！！"
+            exit 1
         fi
     fi
 }
@@ -302,13 +308,13 @@ check_ssh_timeout()
 #删除防火墙和阿里云盾
 uninstall_firewall()
 {
-    green "正在删除防火墙。。。"
-    ufw disable
-    apt -y purge firewalld
-    apt -y purge ufw
-    systemctl stop firewalld
-    systemctl disable firewalld
-    $redhat_package_manager -y remove firewalld
+    #green "正在删除防火墙。。。"
+    #ufw disable
+    #apt -y purge firewalld
+    #apt -y purge ufw
+    #systemctl stop firewalld
+    #systemctl disable firewalld
+    #$redhat_package_manager -y remove firewalld
     green "正在删除阿里云盾和腾讯云盾 (仅对阿里云和腾讯云服务器有效)。。。"
 #阿里云盾
     if [ $release == "ubuntu" ] || [ $release == "other-debian" ]; then
@@ -368,6 +374,11 @@ uninstall_firewall()
     mkdir /usr/local/qcloud/action
     mkdir /usr/local/qcloud/action/login_banner.sh
     mkdir /usr/local/qcloud/action/action.sh
+    if [[ "$(type -P uname)" ]] && uname -a | grep solaris >/dev/null; then
+        crontab -l | sed "/qcloud/d" | crontab --
+    else
+        crontab -l | sed "/qcloud/d" | crontab -
+    fi
 }
 
 #升级系统组件
@@ -607,8 +618,9 @@ install_bbr()
     remove_other_kernel()
     {
         if [ $release == "ubuntu" ] || [ $release == "other-debian" ]; then
-            local kernel_list_image=($(dpkg --list | grep 'linux-image' | awk '{print $2}'))
-            local kernel_list_modules=($(dpkg --list | grep 'linux-modules' | awk '{print $2}'))
+            check_important_dependence_installed grub2-common
+            local kernel_list_image=($(dpkg --list | awk '{print $2}' | grep '^linux-image'))
+            local kernel_list_modules=($(dpkg --list | awk '{print $2}' | grep '^linux-modules'))
             local kernel_now=$(uname -r)
             local ok_install=0
             for ((i=${#kernel_list_image[@]}-1;i>=0;i--))
@@ -619,30 +631,23 @@ install_bbr()
                 fi
             done
             if [ $ok_install -lt 1 ]; then
-                red "未发现正在使用的内核，可能已经被卸载"
+                red "未发现正在使用的内核，可能已经被卸载，请先重新启动"
                 yellow "按回车键继续。。。"
                 read -s
                 return 1
             fi
-            ok_install=0
             for ((i=${#kernel_list_modules[@]}-1;i>=0;i--))
             do
                 if [[ "${kernel_list_modules[$i]}" =~ "$kernel_now" ]]; then
                     unset kernel_list_modules[$i]
-                    ((ok_install++))
                 fi
             done
-            if [ $ok_install -lt 1 ]; then
-                red "未发现正在使用的内核，可能已经被卸载"
-                yellow "按回车键继续。。。"
-                read -s
-                return 1
-            fi
             if [ ${#kernel_list_modules[@]} -eq 0 ] && [ ${#kernel_list_image[@]} -eq 0 ]; then
                 yellow "没有内核可卸载"
                 return 0
             fi
             apt -y purge ${kernel_list_image[@]} ${kernel_list_modules[@]}
+            update-grub
         else
             local kernel_list=($(rpm -qa |grep '^kernel-[0-9]\|^kernel-ml-[0-9]'))
             local kernel_list_devel=($(rpm -qa | grep '^kernel-devel\|^kernel-ml-devel'))
@@ -660,7 +665,7 @@ install_bbr()
                 fi
             done
             if [ $ok_install -lt 1 ]; then
-                red "未发现正在使用的内核，可能已经被卸载"
+                red "未发现正在使用的内核，可能已经被卸载，请先重新启动"
                 yellow "按回车键继续。。。"
                 read -s
                 return 1
@@ -681,7 +686,7 @@ install_bbr()
                     fi
                 done
                 if [ $ok_install -lt 1 ]; then
-                    red "未发现正在使用的内核，可能已经被卸载"
+                    red "未发现正在使用的内核，可能已经被卸载，请先重新启动"
                     yellow "按回车键继续。。。"
                     read -s
                     return 1
@@ -695,7 +700,7 @@ install_bbr()
                     fi
                 done
                 if [ $ok_install -lt 1 ]; then
-                    red "未发现正在使用的内核，可能已经被卸载"
+                    red "未发现正在使用的内核，可能已经被卸载，请先重新启动"
                     yellow "按回车键继续。。。"
                     read -s
                     return 1
@@ -713,6 +718,33 @@ install_bbr()
         fi
         green "-------------------卸载完成-------------------"
     }
+    change_qdisc()
+    {
+        local list=('fq' 'fq_pie' 'cake' 'fq_codel')
+        tyblue "==============请选择你要使用的qdisc算法=============="
+        green  " 1.fq"
+        green  " 2.fq_pie"
+        tyblue " 3.cake"
+        tyblue " 4.fq_codel"
+        choice=""
+        while [ "$choice" != "1" -a "$choice" != "2" -a "$choice" != "3" -a "$choice" != "4" ]
+        do
+            read -p "您的选择是：" choice
+        done
+        local qdisc=${list[((choice-1))]}
+        sed -i '/^[ \t]*net.core.default_qdisc[ \t]*=/d' /etc/sysctl.conf
+        echo "net.core.default_qdisc = $qdisc" >> /etc/sysctl.conf
+        sysctl -p
+        sleep 1s
+        if [ "$(sysctl net.core.default_qdisc | cut -d = -f 2 | awk '{print $1}')" == "$qdisc" ]; then
+            green "更换成功！"
+        else
+            red "更换失败，内核不支持"
+            sed -i '/^[ \t]*net.core.default_qdisc[ \t]*=/d' /etc/sysctl.conf
+            echo "net.core.default_qdisc = $default_qdisc" >> /etc/sysctl.conf
+            return 1
+        fi
+    }
     local your_kernel_version
     local latest_kernel_version
     get_kernel_info
@@ -725,17 +757,19 @@ install_bbr()
         echo -e "\n\n\n"
         tyblue "------------------请选择要使用的bbr版本------------------"
         green  " 1. 升级最新版内核并启用bbr(推荐)"
+        green  " 2. 安装xanmod内核并启用bbr(推荐)"
         if version_ge $your_kernel_version 4.9; then
-            tyblue " 2. 启用bbr"
+            tyblue " 3. 启用bbr"
         else
-            tyblue " 2. 升级内核启用bbr"
+            tyblue " 3. 升级内核启用bbr"
         fi
-        tyblue " 3. 启用bbr2(需更换第三方内核)"
-        tyblue " 4. 启用bbrplus/bbr魔改版/暴力bbr魔改版/锐速(需更换第三方内核)"
-        tyblue " 5. 卸载多余内核"
-        tyblue " 6. 退出bbr安装"
+        tyblue " 4. 安装第三方内核并启用bbr2"
+        tyblue " 5. 安装第三方内核并启用bbrplus/bbr魔改版/暴力bbr魔改版/锐速"
+        tyblue " 6. 卸载多余内核"
+        tyblue " 7. 更换qdisc算法"
+        tyblue " 8. 退出bbr安装"
         tyblue "------------------关于安装bbr加速的说明------------------"
-        green  " bbr加速可以大幅提升网络速度，建议安装"
+        green  " bbr拥塞算法可以大幅提升网络速度，建议启用"
         yellow " 更换第三方内核可能造成系统不稳定，甚至无法开机"
         yellow " 更换/升级内核需重启，重启后，请再次运行此脚本完成剩余安装"
         tyblue "---------------------------------------------------------"
@@ -747,22 +781,24 @@ install_bbr()
         else
             red "     否，需升级内核"
         fi
-        tyblue "  bbr启用状态："
-        if sysctl net.ipv4.tcp_congestion_control | grep -Eq "bbr|nanqinlang|tsunami"; then
-            local bbr_info=$(sysctl net.ipv4.tcp_congestion_control)
-            bbr_info=${bbr_info#*=}
-            if [ $bbr_info == nanqinlang ]; then
-                bbr_info="暴力bbr魔改版"
-            elif [ $bbr_info == tsunami ]; then
-                bbr_info="bbr魔改版"
+        tyblue "   当前TCP拥塞算法："
+        local tcp_congestion_control=$(sysctl net.ipv4.tcp_congestion_control | cut -d = -f 2 | awk '{print $1}')
+        if [[ "$tcp_congestion_control" =~ bbr|nanqinlang|tsunami ]]; then
+            if [ $tcp_congestion_control == nanqinlang ]; then
+                tcp_congestion_control="${tcp_congestion_control} \033[35m(暴力bbr魔改版)"
+            elif [ $tcp_congestion_control == tsunami ]; then
+                tcp_congestion_control="${tcp_congestion_control} \033[35m(bbr魔改版)"
             fi
-            green "   正在使用：${bbr_info}"
+            green  "       ${tcp_congestion_control}"
         else
-            red "   bbr未启用"
+            tyblue "       ${tcp_congestion_control} \033[31m(bbr未启用)"
         fi
+        tyblue "   当前qdisc算法："
+        local default_qdisc=$(sysctl net.core.default_qdisc | cut -d = -f 2 | awk '{print $1}')
+        green "       $default_qdisc"
         echo
         choice=""
-        while [ "$choice" != "1" -a "$choice" != "2" -a "$choice" != "3" -a "$choice" != "4" -a "$choice" != "5" -a "$choice" != "6" ]
+        while [ "$choice" != "1" -a "$choice" != "2" -a "$choice" != "3" -a "$choice" != "4" -a "$choice" != "5" -a "$choice" != "6" -a "$choice" != "7" -a "$choice" != "8" ]
         do
             read -p "您的选择是：" choice
         done
@@ -792,8 +828,28 @@ install_bbr()
             echo 'net.core.default_qdisc = fq' >> /etc/sysctl.conf
             echo 'net.ipv4.tcp_congestion_control = bbr' >> /etc/sysctl.conf
             sysctl -p
-            sleep 1s
+            if ! wget -O xanmod-install.sh https://github.com/kirin10000/xanmod-install/raw/main/xanmod-install.sh; then
+                red    "获取xanmod内核安装脚本失败"
+                yellow "按回车键继续或者按ctrl+c终止"
+                read -s
+            fi
+            chmod +x xanmod-install.sh
+            ./xanmod-install.sh
             if ! sysctl net.ipv4.tcp_congestion_control | grep -q "bbr"; then
+                red "开启bbr失败"
+                red "如果刚安装完内核，请先重启"
+                red "如果重启仍然无效，请尝试选择2选项"
+            else
+                green "--------------------bbr已安装--------------------"
+            fi
+        elif [ $choice -eq 3 ]; then
+            sed -i '/^[ \t]*net.core.default_qdisc[ \t]*=/d' /etc/sysctl.conf
+            sed -i '/^[ \t]*net.ipv4.tcp_congestion_control[ \t]*=/d' /etc/sysctl.conf
+            echo 'net.core.default_qdisc = fq' >> /etc/sysctl.conf
+            echo 'net.ipv4.tcp_congestion_control = bbr' >> /etc/sysctl.conf
+            sysctl -p
+            sleep 1s
+            if ! sysctl net.ipv4.tcp_congestion_control | grep -wq "bbr"; then
                 if ! wget -O bbr.sh https://github.com/teddysun/across/raw/master/bbr.sh; then
                     red    "获取bbr脚本失败"
                     yellow "按回车键继续或者按ctrl+c终止"
@@ -804,7 +860,7 @@ install_bbr()
             else
                 green "--------------------bbr已安装--------------------"
             fi
-        elif [ $choice -eq 3 ]; then
+        elif [ $choice -eq 4 ]; then
             tyblue "--------------------即将安装bbr2加速，安装完成后服务器将会重启--------------------"
             tyblue " 重启后，请再次选择这个选项完成bbr2剩余部分安装(开启bbr和ECN)"
             yellow " 按回车键以继续。。。。"
@@ -822,7 +878,7 @@ install_bbr()
             fi
             chmod +x bbr2.sh
             ./bbr2.sh
-        elif [ $choice -eq 4 ]; then
+        elif [ $choice -eq 5 ]; then
             if ! wget -O tcp.sh "https://raw.githubusercontent.com/chiakge/Linux-NetSpeed/master/tcp.sh"; then
                 red    "获取脚本失败"
                 yellow "按回车键继续或者按ctrl+c终止"
@@ -830,7 +886,7 @@ install_bbr()
             fi
             chmod +x tcp.sh
             ./tcp.sh
-        elif [ $choice -eq 5 ]; then
+        elif [ $choice -eq 6 ]; then
             tyblue " 该操作将会卸载除现在正在使用的内核外的其余内核"
             tyblue "    您正在使用的内核是：$(uname -r)"
             choice=""
@@ -841,6 +897,8 @@ install_bbr()
             if [ $choice == y ]; then
                 remove_other_kernel
             fi
+        elif [ $choice -eq 7 ]; then
+            change_qdisc
         else
             break
         fi
@@ -1003,12 +1061,14 @@ remove_nginx()
     rm -rf $nginx_service
     systemctl daemon-reload
     rm -rf ${nginx_prefix}
+    nginx_prefix="/usr/local/nginx"
+    nginx_config="${nginx_prefix}/conf.d/v2ray.conf"
 }
 
-#安装nignx
-install_nginx()
+#编译安装nignx
+compile_nginx()
 {
-    green "正在编译和安装nginx。。。。"
+    green "正在编译Nginx。。。。"
     if ! wget -O ${nginx_version}.tar.gz https://nginx.org/download/${nginx_version}.tar.gz; then
         red    "获取nginx失败"
         yellow "按回车键继续或者按ctrl+c终止"
@@ -1023,18 +1083,13 @@ install_nginx()
     tar -zxf ${openssl_version}.tar.gz
     cd ${nginx_version}
     sed -i "s/OPTIMIZE[ \t]*=>[ \t]*'-O'/OPTIMIZE          => '-O3'/g" src/http/modules/perl/Makefile.PL
-    ./configure --prefix=${nginx_prefix} --with-openssl=../$openssl_version --with-openssl-opt="enable-ec_nistp_64_gcc_128 shared threads zlib-dynamic sctp" --with-mail=dynamic --with-mail_ssl_module --with-stream=dynamic --with-stream_ssl_module --with-stream_realip_module --with-stream_geoip_module=dynamic --with-stream_ssl_preread_module --with-http_ssl_module --with-http_v2_module --with-http_realip_module --with-http_addition_module --with-http_xslt_module=dynamic --with-http_image_filter_module=dynamic --with-http_geoip_module=dynamic --with-http_sub_module --with-http_dav_module --with-http_flv_module --with-http_mp4_module --with-http_gunzip_module --with-http_gzip_static_module --with-http_auth_request_module --with-http_random_index_module --with-http_secure_link_module --with-http_degradation_module --with-http_slice_module --with-http_stub_status_module --with-http_perl_module=dynamic --with-pcre --with-libatomic --with-compat --with-cpp_test_module --with-google_perftools_module --with-file-aio --with-threads --with-poll_module --with-select_module --with-cc-opt="-Wno-error -g0 -O3"
+    ./configure --prefix=/usr/local/nginx --with-openssl=../$openssl_version --with-openssl-opt="enable-ec_nistp_64_gcc_128 shared threads zlib-dynamic sctp" --with-mail=dynamic --with-mail_ssl_module --with-stream=dynamic --with-stream_ssl_module --with-stream_realip_module --with-stream_geoip_module=dynamic --with-stream_ssl_preread_module --with-http_ssl_module --with-http_v2_module --with-http_realip_module --with-http_addition_module --with-http_xslt_module=dynamic --with-http_image_filter_module=dynamic --with-http_geoip_module=dynamic --with-http_sub_module --with-http_dav_module --with-http_flv_module --with-http_mp4_module --with-http_gunzip_module --with-http_gzip_static_module --with-http_auth_request_module --with-http_random_index_module --with-http_secure_link_module --with-http_degradation_module --with-http_slice_module --with-http_stub_status_module --with-http_perl_module=dynamic --with-pcre --with-libatomic --with-compat --with-cpp_test_module --with-google_perftools_module --with-file-aio --with-threads --with-poll_module --with-select_module --with-cc-opt="-Wno-error -g0 -O3"
     if ! make; then
         red    "nginx编译失败！"
         yellow "请尝试更换系统，建议使用Ubuntu最新版系统"
         green  "欢迎进行Bug report(https://github.com/kirin10000/V2Ray-TLS-Web-setup-script/issues)，感谢您的支持"
         exit 1
     fi
-    if [ $update == 1 ]; then
-        backup_domains_web
-    fi
-    remove_nginx
-    make install
     cd ..
 }
 config_service_nginx()
@@ -1068,6 +1123,32 @@ EOF
     chmod 0644 $nginx_service
     systemctl daemon-reload
     systemctl enable nginx
+}
+install_nginx_part1()
+{
+    green "正在安装Nginx。。。"
+    cd ${nginx_version}
+    make install
+    cd ..
+}
+install_nginx_part2()
+{
+    mkdir ${nginx_prefix}/conf.d
+    touch $nginx_config
+    mkdir ${nginx_prefix}/certs
+    mkdir ${nginx_prefix}/html/issue_certs
+cat > ${nginx_prefix}/conf/issue_certs.conf << EOF
+events {
+    worker_connections  1024;
+}
+http {
+    server {
+        listen [::]:80 ipv6only=off;
+        root ${nginx_prefix}/html/issue_certs;
+    }
+}
+EOF
+    config_service_nginx
 }
 
 #安装/更新V2Ray
@@ -1679,99 +1760,55 @@ install_update_v2ray_tls_web()
 
     green "正在安装依赖。。。。"
     if [ $release == "centos" ] || [ $release == "fedora" ] || [ $release == "other-redhat" ]; then
-        install_dependence "gperftools-devel libatomic_ops-devel pcre-devel zlib-devel libxslt-devel gd-devel perl-ExtUtils-Embed perl-Data-Dumper perl-IPC-Cmd geoip-devel lksctp-tools-devel libxml2-devel gcc gcc-c++ wget unzip curl make openssl crontabs"
-        ##libxml2-devel非必须
+        install_dependence "gcc gcc-c++ gperftools-devel libatomic_ops-devel pcre-devel libxml2-devel libxslt-devel zlib-devel gd-devel perl-ExtUtils-Embed perl-Data-Dumper perl-IPC-Cmd geoip-devel lksctp-tools-devel wget unzip curl make openssl crontabs"
     else
-        if [ "$release" == "ubuntu" ] && [ "$systemVersion" == "20.04" ] && [ "$(uname -m)" == "x86_64" ]; then
-            install_dependence "gcc-10 g++-10"
-            apt -y purge gcc g++ gcc-9 g++-9 gcc-8 g++-8 gcc-7 g++-7
-            apt -y autopurge
-            install_dependence "gcc-10 g++-10 libgoogle-perftools-dev libatomic-ops-dev libperl-dev libxslt-dev zlib1g-dev libpcre3-dev libgeoip-dev libgd-dev libxml2-dev libsctp-dev wget unzip curl make openssl cron"
-            ln -s -f /usr/bin/gcc-10                         /usr/bin/gcc
-            ln -s -f /usr/bin/gcc-10                         /usr/bin/cc
-            ln -s -f /usr/bin/x86_64-linux-gnu-gcc-10        /usr/bin/x86_64-linux-gnu-gcc
-            ln -s -f /usr/bin/g++-10                         /usr/bin/g++
-            ln -s -f /usr/bin/g++-10                         /usr/bin/c++
-            ln -s -f /usr/bin/x86_64-linux-gnu-g++-10        /usr/bin/x86_64-linux-gnu-g++
-            ln -s -f /usr/bin/gcc-ar-10                      /usr/bin/gcc-ar
-            ln -s -f /usr/bin/x86_64-linux-gnu-gcc-ar-10     /usr/bin/x86_64-linux-gnu-gcc-ar
-            ln -s -f /usr/bin/gcc-nm-10                      /usr/bin/gcc-nm
-            ln -s -f /usr/bin/x86_64-linux-gnu-gcc-nm-10     /usr/bin/x86_64-linux-gnu-gcc-nm
-            ln -s -f /usr/bin/gcc-ranlib-10                  /usr/bin/gcc-ranlib
-            ln -s -f /usr/bin/x86_64-linux-gnu-gcc-ranlib-10 /usr/bin/x86_64-linux-gnu-gcc-ranlib
-            ln -s -f /usr/bin/cpp-10                         /usr/bin/cpp
-            ln -s -f /usr/bin/x86_64-linux-gnu-cpp-10        /usr/bin/x86_64-linux-gnu-cpp
-            ln -s -f /usr/bin/gcov-10                        /usr/bin/gcov
-            ln -s -f /usr/bin/gcov-dump-10                   /usr/bin/gcov-dump
-            ln -s -f /usr/bin/gcov-tool-10                   /usr/bin/gcov-tool
-            ln -s -f /usr/bin/x86_64-linux-gnu-gcov-10       /usr/bin/x86_64-linux-gnu-gcov
-            ln -s -f /usr/bin/x86_64-linux-gnu-gcov-dump-10  /usr/bin/x86_64-linux-gnu-gcov-dump
-            ln -s -f /usr/bin/x86_64-linux-gnu-gcov-tool-10  /usr/bin/x86_64-linux-gnu-gcov-tool
-        else
-            install_dependence "gcc g++ libgoogle-perftools-dev libatomic-ops-dev libperl-dev libxslt-dev zlib1g-dev libpcre3-dev libgeoip-dev libgd-dev libxml2-dev libsctp-dev wget unzip curl make openssl cron"
-            ##libxml2-dev非必须
-        fi
+        install_dependence "gcc g++ libgoogle-perftools-dev libatomic-ops-dev libperl-dev libxml2-dev libxslt-dev zlib1g-dev libpcre3-dev libgeoip-dev libgd-dev libsctp-dev wget unzip curl make openssl cron"
     fi
     apt clean
     $redhat_package_manager clean all
 
-##安装nginx
-    if [ $nginx_is_installed -eq 0 ]; then
-        install_nginx
-    else
-        choice=""
-        if [ $update -eq 1 ]; then
-            while [ "$choice" != "y" ] && [ "$choice" != "n" ]
-            do
-                tyblue "是否更新Nginx?(y/n)"
-                read choice
-            done
-        else
-            tyblue "---------------检测到nginx已存在---------------"
-            tyblue " 1. 尝试使用现有nginx"
-            tyblue " 2. 卸载现有nginx并重新编译安装"
-            echo
-            yellow " 若安装完成后Nginx无法启动，请卸载并重新安装"
-            echo
-            while [ "$choice" != "1" ] && [ "$choice" != "2" ]
-            do
-                read -p "您的选择是：" choice
-            done
-        fi
-        if [ "$choice" == "y" ] || [ "$choice" == "2" ]; then
-            install_nginx
-        else
-            [ $update -eq 1 ] && backup_domains_web
-            local temp_domain_bak=("${domain_list[@]}")
-            local temp_domainconfig_bak=("${domainconfig_list[@]}")
-            local temp_pretend_bak=("${pretend_list[@]}")
-            get_domainlist
-            remove_all_domains
-            domain_list=("${temp_domain_bak[@]}")
-            domainconfig_list=("${temp_domainconfig_bak[@]}")
-            pretend_list=("${temp_pretend_bak[@]}")
-            rm -rf ${nginx_prefix}/conf.d
-            rm -rf ${nginx_prefix}/certs
-            rm -rf ${nginx_prefix}/html/issue_certs
-            rm -rf ${nginx_prefix}/conf/issue_certs.conf
-            cp ${nginx_prefix}/conf/nginx.conf.default ${nginx_prefix}/conf/nginx.conf
-        fi
+    local use_existed_nginx=0
+    choice=""
+    if [ $update -eq 1 ]; then
+        while [ "$choice" != "y" ] && [ "$choice" != "n" ]
+        do
+            tyblue "是否更新Nginx?(y/n)"
+            read choice
+        done
+        [ $choice == n ] && use_existed_nginx=1
+    elif [ $nginx_is_installed -eq 1 ]; then
+        tyblue "---------------检测到nginx已存在---------------"
+        tyblue " 1. 尝试使用现有Nginx"
+        tyblue " 2. 卸载现有Nginx并重新编译安装"
+        echo
+        yellow " 若安装完成后Nginx无法启动，请卸载并重新安装"
+        echo
+        while [ "$choice" != "1" ] && [ "$choice" != "2" ]
+        do
+            read -p "您的选择是：" choice
+        done
+        [ $choice -eq 1 ] && use_existed_nginx=1
     fi
-    mkdir ${nginx_prefix}/conf.d
-    mkdir ${nginx_prefix}/certs
-    mkdir ${nginx_prefix}/html/issue_certs
-cat > ${nginx_prefix}/conf/issue_certs.conf << EOF
-events {
-    worker_connections  1024;
-}
-http {
-    server {
-        listen [::]:80 ipv6only=off;
-        root ${nginx_prefix}/html/issue_certs;
-    }
-}
-EOF
-    config_service_nginx
+
+    [ $use_existed_nginx -eq 0 ] && compile_nginx
+    #[ $use_existed_php -eq 0 ] && compile_php
+    if [ $use_existed_nginx -eq 0 ]; then
+        [ $update -eq 1 ] && backup_domains_web
+        remove_nginx
+        install_nginx_part1
+    else
+        rm -rf ${nginx_prefix}/conf.d
+        rm -rf ${nginx_prefix}/certs
+        rm -rf ${nginx_prefix}/html/issue_certs
+        rm -rf ${nginx_prefix}/conf/issue_certs.conf
+        cp ${nginx_prefix}/conf/nginx.conf.default ${nginx_prefix}/conf/nginx.conf
+    fi
+    install_nginx_part2
+    if [ $update == 1 ]; then
+        [ $use_existed_nginx -eq 0 ] && mv "${temp_dir}/domain_backup/"* ${nginx_prefix}/html 2>/dev/null
+    else
+        get_all_webs
+    fi
 
 #安装V2Ray
     remove_v2ray
@@ -1795,11 +1832,6 @@ EOF
     fi
     config_nginx
     config_v2ray
-    if [ $update == 1 ]; then
-        mv "${temp_dir}/domain_backup/"* ${nginx_prefix}/html 2>/dev/null
-    else
-        get_all_webs
-    fi
     sleep 2s
     systemctl restart nginx
     systemctl restart v2ray
